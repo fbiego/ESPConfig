@@ -1,0 +1,857 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ESPConfig</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f1ea;
+      --card: #fffdf8;
+      --ink: #1f2927;
+      --muted: #64716d;
+      --line: #d9ddd8;
+      --accent: #087f68;
+      --accent-dark: #05604f;
+      --error: #b42318;
+      font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); }
+    main { width: min(760px, calc(100% - 32px)); margin: 48px auto; }
+    header { display: flex; gap: 24px; align-items: end; justify-content: space-between; margin-bottom: 24px; }
+    .connect-actions { display: flex; flex-wrap: wrap; gap: 9px; justify-content: end; }
+    h1 { margin: 0 0 6px; font-size: clamp(2rem, 8vw, 3.4rem); letter-spacing: -.06em; }
+    p { margin: 0; color: var(--muted); }
+    button {
+      border: 0; border-radius: 9px; padding: 11px 16px; background: var(--accent);
+      color: white; font: inherit; font-weight: 700; cursor: pointer;
+    }
+    button:hover { background: var(--accent-dark); }
+    button:disabled { cursor: not-allowed; opacity: .5; }
+    button.secondary { background: transparent; border: 1px solid var(--line); color: var(--ink); }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 22px; box-shadow: 0 12px 36px #273b3520; }
+    .status { display: flex; align-items: center; gap: 9px; margin-bottom: 18px; color: var(--muted); }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: #9ca3af; }
+    .connected .dot { background: var(--accent); box-shadow: 0 0 0 4px #087f6820; }
+    form { display: grid; gap: 18px; }
+    .field { display: grid; gap: 7px; }
+    label, legend { font-weight: 700; }
+    small { color: var(--muted); font-weight: 400; }
+    input[type="text"], input[type="number"], input[type="password"] {
+      width: 100%; border: 1px solid var(--line); border-radius: 9px; padding: 11px 12px;
+      background: white; color: var(--ink); font: inherit;
+    }
+    input:focus { outline: 3px solid #087f6825; border-color: var(--accent); }
+    .check { display: flex; gap: 10px; align-items: center; }
+    fieldset { border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+    .pair { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; margin-top: 9px; }
+    .pair button { padding: 8px 11px; }
+    .pair .check { min-height: 43px; padding: 0 10px; border: 1px solid var(--line); border-radius: 9px; background: white; }
+    .item { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 9px; }
+    .item button { padding: 8px 11px; }
+    .item .check { min-height: 43px; padding: 0 10px; border: 1px solid var(--line); border-radius: 9px; background: white; }
+    .actions { display: flex; gap: 10px; margin-top: 4px; }
+    .device-actions { display: grid; gap: 10px; border-top: 1px solid var(--line); padding-top: 18px; }
+    .device-actions h2 { margin: 0; font-size: 1rem; }
+    .device-actions-buttons { display: flex; flex-wrap: wrap; gap: 10px; }
+    .message { min-height: 22px; margin-top: 14px; color: var(--muted); }
+    .message.error { color: var(--error); }
+    .empty { padding: 32px 8px; text-align: center; color: var(--muted); }
+    .auth { display: grid; gap: 12px; max-width: 420px; margin: 20px auto; }
+    .auth .actions { margin-top: 0; }
+    details { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 14px; }
+    summary { cursor: pointer; color: var(--muted); font-weight: 700; }
+    .log-actions { display: flex; justify-content: end; margin: 10px 0 7px; }
+    .log-actions button { padding: 7px 11px; font-size: .85rem; }
+    pre {
+      max-height: 240px; overflow: auto; margin: 0; border-radius: 9px; padding: 12px;
+      background: #17211f; color: #d7e4df; font: .78rem/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+      white-space: pre-wrap; overflow-wrap: anywhere;
+    }
+    @media (max-width: 580px) {
+      main { margin: 24px auto; }
+      header { align-items: stretch; flex-direction: column; }
+      .pair { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>ESPConfig</h1>
+        <p id="subtitle">Configure an ESP32 over serial or Bluetooth.</p>
+      </div>
+      <div class="connect-actions">
+        <button id="connect-serial">Connect Serial</button>
+        <button id="connect-ble" class="secondary">Connect BLE</button>
+      </div>
+    </header>
+
+    <section class="card">
+      <div class="status" id="status"><span class="dot"></span><span>Not connected</span></div>
+      <form id="form">
+        <div class="empty">Connect an ESP32 to load its configurable properties.</div>
+      </form>
+      <div class="message" id="message" aria-live="polite"></div>
+      <details>
+        <summary>Connection log</summary>
+        <div class="log-actions"><button type="button" class="secondary" id="clear-log">Clear log</button></div>
+        <pre id="log" aria-live="polite">Waiting for connection...</pre>
+      </details>
+    </section>
+  </main>
+
+  <script>
+    const MAGIC_FIRST = 0xec;
+    const MAGIC_SECOND = 0xcf;
+    const PROTOCOL_VERSION = 1;
+    const MAX_PAYLOAD_LENGTH = 16384;
+    const PACKET_TYPES = {
+      HELLO: 0x01, AUTH: 0x02, SCHEMA: 0x03, CONFIG: 0x04,
+      SET: 0x10, CLEAR_ITEMS: 0x11, ADD_ITEM: 0x12,
+      CLEAR_PAIRS: 0x13, ADD_PAIR: 0x14, ACTION: 0x15
+    };
+    const RESPONSE_TIMEOUT_SECONDS = 7;
+    const HANDSHAKE_MAX_ATTEMPTS = 3;
+    const BLE_DISCOVERY_MAX_ATTEMPTS = 3;
+    const BLE_SERVICE_UUID = "fb1e4000-54ae-4a28-9f74-dfccb248601d";
+    const BLE_COMMAND_UUID = "fb1e4004-54ae-4a28-9f74-dfccb248601d";
+    const BLE_RESPONSE_UUID = "fb1e4005-54ae-4a28-9f74-dfccb248601d";
+    const BLE_WRITE_CHUNK_SIZE = 20;
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
+    const serialButton = document.querySelector("#connect-serial");
+    const bleButton = document.querySelector("#connect-ble");
+    const form = document.querySelector("#form");
+    const status = document.querySelector("#status");
+    const message = document.querySelector("#message");
+    const subtitle = document.querySelector("#subtitle");
+    const logOutput = document.querySelector("#log");
+    const clearLogButton = document.querySelector("#clear-log");
+
+    let port;
+    let writer;
+    let activeReader;
+    let bleDevice;
+    let bleCommand;
+    let bleResponse;
+    let transport;
+    let receiveBuffer = new Uint8Array();
+    let keepReading = false;
+    let fields = [];
+    let deviceActions = [];
+    let values = {};
+    let requestNumber = 0;
+    let responseTimer;
+    let expectedPackets = new Set();
+    let handshakeAttempt = 0;
+    let sendQueue = Promise.resolve();
+    const pending = new Map();
+
+    function setMessage(text, error = false) {
+      message.textContent = text;
+      message.classList.toggle("error", error);
+    }
+
+    function log(text, level = "info") {
+      const time = new Date().toLocaleTimeString();
+      const line = `[${time}] ${level.toUpperCase()}: ${text}`;
+      logOutput.textContent = logOutput.textContent === "Waiting for connection..." ? line : `${logOutput.textContent}\n${line}`;
+      logOutput.scrollTop = logOutput.scrollHeight;
+    }
+
+    function waitForPackets(types) {
+      clearTimeout(responseTimer);
+      expectedPackets = new Set(types);
+      handshakeAttempt = 1;
+      schedulePacketTimeout();
+    }
+
+    function schedulePacketTimeout() {
+      clearTimeout(responseTimer);
+      responseTimer = setTimeout(() => {
+        const missing = [...expectedPackets].join(", ");
+        if (transport && expectedPackets.size && handshakeAttempt < HANDSHAKE_MAX_ATTEMPTS) {
+          handshakeAttempt++;
+          log(`Retrying handshake (${handshakeAttempt}/${HANDSHAKE_MAX_ATTEMPTS}); waiting for: ${missing}`, "warning");
+          retryMissingPackets();
+          schedulePacketTimeout();
+          return;
+        }
+        const text = `Timed out after ${RESPONSE_TIMEOUT_SECONDS} seconds waiting for: ${missing}.`;
+        setMessage(`${text} Handshake failed after ${HANDSHAKE_MAX_ATTEMPTS} attempts.`, true);
+        log(text, "error");
+        expectedPackets.clear();
+      }, RESPONSE_TIMEOUT_SECONDS * 1000);
+    }
+
+    function retryMissingPackets() {
+      if (expectedPackets.has("ready")) {
+        send("HELLO").catch(handleBackgroundError);
+        return;
+      }
+      if (expectedPackets.has("schema")) send("SCHEMA").catch(handleBackgroundError);
+      if (expectedPackets.has("config")) send("CONFIG").catch(handleBackgroundError);
+    }
+
+    function handleBackgroundError(error) {
+      log(error.message, "error");
+      setMessage(error.message, true);
+    }
+
+    function packetReceived(type) {
+      expectedPackets.delete(type);
+      if (expectedPackets.size === 0) {
+        clearTimeout(responseTimer);
+        responseTimer = null;
+        return true;
+      }
+      return false;
+    }
+
+    function crc16(bytes) {
+      let crc = 0xffff;
+      for (const byte of bytes) {
+        crc ^= byte << 8;
+        for (let bit = 0; bit < 8; bit++) {
+          crc = crc & 0x8000 ? ((crc << 1) ^ 0x1021) & 0xffff : (crc << 1) & 0xffff;
+        }
+      }
+      return crc;
+    }
+
+    function uint32Bytes(value) {
+      const bytes = new Uint8Array(4);
+      new DataView(bytes.buffer).setUint32(0, value, true);
+      return bytes;
+    }
+
+    function stringBytes(value) {
+      const text = encoder.encode(String(value));
+      if (text.length > 0xffff) throw new Error("Protocol string is too long.");
+      const bytes = new Uint8Array(text.length + 2);
+      new DataView(bytes.buffer).setUint16(0, text.length, true);
+      bytes.set(text, 2);
+      return bytes;
+    }
+
+    function concatenate(...parts) {
+      const output = new Uint8Array(parts.reduce((length, part) => length + part.length, 0));
+      let offset = 0;
+      for (const part of parts) {
+        output.set(part, offset);
+        offset += part.length;
+      }
+      return output;
+    }
+
+    function buildFrame(type, payload = new Uint8Array()) {
+      if (payload.length > MAX_PAYLOAD_LENGTH) throw new Error("Protocol payload is too long.");
+      const frame = new Uint8Array(payload.length + 8);
+      frame.set([MAGIC_FIRST, MAGIC_SECOND, PROTOCOL_VERSION, type], 0);
+      new DataView(frame.buffer).setUint16(4, payload.length, true);
+      frame.set(payload, 6);
+      new DataView(frame.buffer).setUint16(frame.length - 2, crc16(frame.slice(2, -2)), true);
+      return frame;
+    }
+
+    function commandPayload(command, args) {
+      if (command === "HELLO" || command === "SCHEMA" || command === "CONFIG") {
+        if (args.length) throw new Error(`Unexpected ${command} arguments.`);
+        return new Uint8Array();
+      }
+      if (command === "AUTH") {
+        return concatenate(uint32Bytes(args[0]), stringBytes(args[1]));
+      }
+      return concatenate(uint32Bytes(args[0]), ...args.slice(1).map(stringBytes));
+    }
+
+    async function send(command, ...args) {
+      if (!transport) throw new Error("ESP32 is not connected.");
+      const type = PACKET_TYPES[command];
+      if (type === undefined) throw new Error(`Unknown command: ${command}`);
+      log(`TX ${command}${args[0] ? ` request=${args[0]}` : ""}`);
+      const bytes = buildFrame(type, commandPayload(command, args));
+      const operation = async () => {
+        if (transport === "serial" && writer) {
+          await writer.write(bytes);
+          return;
+        }
+        if (transport !== "ble" || !bleCommand) {
+          throw new Error("ESP32 disconnected before the command was sent.");
+        }
+        for (let offset = 0; offset < bytes.length; offset += BLE_WRITE_CHUNK_SIZE) {
+          const chunk = bytes.slice(offset, offset + BLE_WRITE_CHUNK_SIZE);
+          if (bleCommand.properties.writeWithoutResponse && bleCommand.writeValueWithoutResponse) {
+            await bleCommand.writeValueWithoutResponse(chunk);
+          } else if (bleCommand.writeValueWithResponse) {
+            await bleCommand.writeValueWithResponse(chunk);
+          } else {
+            await bleCommand.writeValue(chunk);
+          }
+        }
+      };
+      const queued = sendQueue.catch(() => {}).then(operation);
+      sendQueue = queued;
+      return queued;
+    }
+
+    async function request(command, key, ...args) {
+      const id = ++requestNumber;
+      const result = new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          pending.delete(id);
+          log(`Request ${id} (${command}) timed out`, "error");
+          reject(new Error("The ESP32 did not respond."));
+        }, 3000);
+        pending.set(id, { resolve, reject, timeout });
+      });
+      try {
+        await send(command, id, key, ...args);
+      } catch (error) {
+        const item = pending.get(id);
+        clearTimeout(item?.timeout);
+        pending.delete(id);
+        item?.reject(error);
+      }
+      return result;
+    }
+
+    async function authenticate(password) {
+      const id = ++requestNumber;
+      const result = new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          pending.delete(id);
+          log(`Request ${id} (AUTH) timed out`, "error");
+          reject(new Error("The ESP32 did not respond to authentication."));
+        }, RESPONSE_TIMEOUT_SECONDS * 1000);
+        pending.set(id, { resolve, reject, timeout });
+      });
+      try {
+        await send("AUTH", id, password);
+      } catch (error) {
+        const item = pending.get(id);
+        clearTimeout(item?.timeout);
+        pending.delete(id);
+        item?.reject(error);
+      }
+      return result;
+    }
+
+    function requestConfiguration() {
+      waitForPackets(["schema", "config"]);
+      send("SCHEMA").catch(error => setMessage(error.message, true));
+      send("CONFIG").catch(error => setMessage(error.message, true));
+    }
+
+    function renderAuthentication() {
+      form.innerHTML = `
+        <div class="auth">
+          <div>
+            <label for="access-password">Configuration password</label>
+            <input id="access-password" type="password" autocomplete="current-password" required>
+          </div>
+          <div class="actions"><button type="submit">Unlock configuration</button></div>
+        </div>`;
+      form.querySelector("input").focus();
+    }
+
+    function clearDeviceUi() {
+      fields = [];
+      deviceActions = [];
+      values = {};
+      subtitle.textContent = "Configure an ESP32 over serial or Bluetooth.";
+      form.innerHTML = `<div class="empty">Connect an ESP32 to load its configurable properties.</div>`;
+      setMessage("");
+    }
+
+    function startSession(type) {
+      transport = type;
+      serialButton.textContent = type === "serial" ? "Disconnect" : "Connect Serial";
+      bleButton.textContent = type === "ble" ? "Disconnect" : "Connect BLE";
+      serialButton.disabled = type === "ble";
+      bleButton.disabled = type === "serial";
+      status.classList.add("connected");
+      status.lastElementChild.textContent = `Connected over ${type === "ble" ? "Bluetooth" : "serial"}, discovering device...`;
+      fields = [];
+      deviceActions = [];
+      values = {};
+      receiveBuffer = new Uint8Array();
+      sendQueue = Promise.resolve();
+      waitForPackets(["ready"]);
+    }
+
+    async function connectSerial() {
+      if (!("serial" in navigator)) {
+        setMessage("Web Serial is unavailable. Use a Chromium-based browser on localhost or HTTPS.", true);
+        return;
+      }
+      try {
+        serialButton.disabled = true;
+        bleButton.disabled = true;
+        log("Opening serial port at 115200 baud");
+        port = await navigator.serial.requestPort();
+        await port.open({ baudRate: 115200 });
+        writer = port.writable.getWriter();
+        keepReading = true;
+        startSession("serial");
+        readSerialLoop();
+        await send("HELLO");
+      } catch (error) {
+        log(error.message, "error");
+        await disconnect();
+        setMessage(error.message, true);
+      }
+    }
+
+    async function connectBle() {
+      if (!("bluetooth" in navigator)) {
+        setMessage("Web Bluetooth is unavailable. Use a supported Chromium-based browser on HTTPS or localhost.", true);
+        return;
+      }
+      try {
+        serialButton.disabled = true;
+        bleButton.disabled = true;
+        log("Requesting ESPConfig Bluetooth device");
+        bleDevice = await navigator.bluetooth.requestDevice({
+          acceptAllDevices: true,
+          optionalServices: [BLE_SERVICE_UUID]
+        });
+        log(`Selected Bluetooth device: ${bleDevice.name || "unnamed device"}`);
+        await discoverBleCharacteristics();
+        bleDevice.addEventListener("gattserverdisconnected", handleBleDisconnect);
+        bleResponse.addEventListener("characteristicvaluechanged", handleBleNotification);
+        await bleResponse.startNotifications();
+        startSession("ble");
+        await send("HELLO");
+        log("Init complete");
+      } catch (error) {
+        log(error.message, "error");
+        await disconnect();
+        setMessage(error.message, true);
+      }
+    }
+
+    async function discoverBleCharacteristics() {
+      let lastError;
+      for (let attempt = 1; attempt <= BLE_DISCOVERY_MAX_ATTEMPTS; attempt++) {
+        try {
+          log(`Connecting and discovering BLE service (${attempt}/${BLE_DISCOVERY_MAX_ATTEMPTS})`);
+          const server = bleDevice.gatt.connected ? bleDevice.gatt : await bleDevice.gatt.connect();
+          const service = await server.getPrimaryService(BLE_SERVICE_UUID);
+          bleCommand = await service.getCharacteristic(BLE_COMMAND_UUID);
+          bleResponse = await service.getCharacteristic(BLE_RESPONSE_UUID);
+          log("ESPConfig BLE service and characteristics discovered");
+          return;
+        } catch (error) {
+          lastError = error;
+          log(`BLE discovery attempt ${attempt} failed: ${error.message}`, "warning");
+          if (bleDevice.gatt.connected) bleDevice.gatt.disconnect();
+          if (attempt < BLE_DISCOVERY_MAX_ATTEMPTS) {
+            await new Promise(resolve => setTimeout(resolve, 700 * attempt));
+          }
+        }
+      }
+      throw new Error(`Could not discover the ESPConfig BLE service: ${lastError?.message || "unknown error"}`);
+    }
+
+    async function disconnect() {
+      clearTimeout(responseTimer);
+      responseTimer = null;
+      expectedPackets.clear();
+      handshakeAttempt = 0;
+      keepReading = false;
+      for (const item of pending.values()) {
+        clearTimeout(item.timeout);
+        item.reject(new Error("ESP32 disconnected."));
+      }
+      pending.clear();
+      if (writer) {
+        writer.releaseLock();
+        writer = null;
+      }
+      if (activeReader) {
+        try { await activeReader.cancel(); } catch (_) {}
+      }
+      if (port) {
+        try { await port.close(); } catch (_) {}
+        port = null;
+      }
+      if (bleResponse) {
+        bleResponse.removeEventListener("characteristicvaluechanged", handleBleNotification);
+        try { await bleResponse.stopNotifications(); } catch (_) {}
+        bleResponse = null;
+      }
+      bleCommand = null;
+      if (bleDevice) {
+        bleDevice.removeEventListener("gattserverdisconnected", handleBleDisconnect);
+        if (bleDevice.gatt.connected) bleDevice.gatt.disconnect();
+        bleDevice = null;
+      }
+      const disconnectedTransport = transport;
+      transport = null;
+      serialButton.textContent = "Connect Serial";
+      bleButton.textContent = "Connect BLE";
+      serialButton.disabled = false;
+      bleButton.disabled = false;
+      status.classList.remove("connected");
+      status.lastElementChild.textContent = "Not connected";
+      clearDeviceUi();
+      log(`${disconnectedTransport === "ble" ? "Bluetooth" : disconnectedTransport === "serial" ? "Serial" : "Connection"} disconnected`);
+    }
+
+    async function readSerialLoop() {
+      while (port?.readable && keepReading) {
+        const reader = port.readable.getReader();
+        activeReader = reader;
+        try {
+          while (keepReading) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            receiveBytes(value);
+          }
+        } catch (error) {
+          if (keepReading) {
+            log(`Read failed: ${error.message}`, "error");
+            setMessage(error.message, true);
+          }
+        } finally {
+          reader.releaseLock();
+          if (activeReader === reader) activeReader = null;
+        }
+      }
+      if (transport === "serial" && keepReading) {
+        log("Serial read stream ended", "warning");
+        disconnect();
+      }
+    }
+
+    function handleBleNotification(event) {
+      const value = event.target.value;
+      receiveBytes(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
+    }
+
+    function handleBleDisconnect() {
+      if (transport === "ble") disconnect();
+    }
+
+    function receiveBytes(bytes) {
+      receiveBuffer = concatenate(receiveBuffer, bytes);
+      while (receiveBuffer.length >= 2) {
+        if (receiveBuffer[0] !== MAGIC_FIRST || receiveBuffer[1] !== MAGIC_SECOND) {
+          receiveBuffer = receiveBuffer.slice(1);
+          continue;
+        }
+        if (receiveBuffer.length < 6) return;
+        if (receiveBuffer[2] !== PROTOCOL_VERSION) {
+          log(`Unsupported protocol frame version: ${receiveBuffer[2]}`, "warning");
+          receiveBuffer = receiveBuffer.slice(1);
+          continue;
+        }
+        const payloadLength = new DataView(receiveBuffer.buffer, receiveBuffer.byteOffset).getUint16(4, true);
+        if (payloadLength > MAX_PAYLOAD_LENGTH) {
+          log(`Rejected oversized protocol payload: ${payloadLength} bytes`, "warning");
+          receiveBuffer = receiveBuffer.slice(1);
+          continue;
+        }
+        const frameLength = payloadLength + 8;
+        if (receiveBuffer.length < frameLength) return;
+        const frame = receiveBuffer.slice(0, frameLength);
+        const expected = new DataView(frame.buffer, frame.byteOffset).getUint16(frameLength - 2, true);
+        const actual = crc16(frame.slice(2, -2));
+        if (expected !== actual) {
+          log("Rejected protocol frame with invalid CRC", "warning");
+          receiveBuffer = receiveBuffer.slice(1);
+          continue;
+        }
+        receiveBuffer = receiveBuffer.slice(frameLength);
+        handlePacket(frame[3], frame.slice(6, -2));
+      }
+    }
+
+    function handlePacket(type, payload) {
+      try {
+        const packet = JSON.parse(decoder.decode(payload));
+        log(`RX ${packet.type}${packet.id ? ` request=${packet.id}` : ""}${packet.ok === false ? " rejected" : ""}`);
+        if (packet.type === "ready") {
+          packetReceived("ready");
+          subtitle.textContent = packet.device;
+          status.lastElementChild.textContent = `Connected to ${packet.device}`;
+          if (packet.protected && !packet.authenticated) {
+            status.lastElementChild.textContent = `Connected to ${packet.device}, locked`;
+            renderAuthentication();
+            setMessage("Enter the password configured on the ESP32.");
+          } else {
+            requestConfiguration();
+          }
+        } else if (packet.type === "schema") {
+          const loaded = packetReceived("schema");
+          fields = packet.fields;
+          deviceActions = packet.actions || [];
+          render();
+          if (loaded) setMessage("Configuration loaded.");
+        } else if (packet.type === "config") {
+          const loaded = packetReceived("config");
+          values = packet.values;
+          render();
+          if (loaded) setMessage("Configuration loaded.");
+        } else if (packet.type === "result") {
+          const item = pending.get(packet.id);
+          if (!item) return;
+          clearTimeout(item.timeout);
+          pending.delete(packet.id);
+          packet.ok ? item.resolve() : item.reject(new Error(packet.message || "Update rejected."));
+        } else if (packet.type === "error") {
+          log(packet.message, "error");
+          setMessage(packet.message, true);
+        }
+      } catch (error) {
+        log(`Invalid ESPConfig response packet 0x${type.toString(16)}: ${error.message}`, "error");
+        setMessage("Received an invalid ESPConfig response.", true);
+      }
+    }
+
+    function inputFor(field) {
+      if (field.type === "boolean") {
+        const wrapper = document.createElement("label");
+        wrapper.className = "check";
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.name = field.key;
+        input.checked = Boolean(values[field.key]);
+        wrapper.append(input, document.createTextNode(field.label));
+        return wrapper;
+      }
+
+      const wrapper = document.createElement("div");
+      wrapper.className = "field";
+      const label = document.createElement("label");
+      label.htmlFor = `field-${field.key}`;
+      label.textContent = field.label;
+      if (field.required) label.append(Object.assign(document.createElement("small"), { textContent: " (required)" }));
+      const input = document.createElement("input");
+      input.id = `field-${field.key}`;
+      input.name = field.key;
+      input.type = field.type === "integer" ? "number" : "text";
+      input.required = field.required;
+      input.value = values[field.key] ?? "";
+      wrapper.append(label, input);
+      return wrapper;
+    }
+
+    function pairArrayFor(field) {
+      const group = document.createElement("fieldset");
+      group.dataset.key = field.key;
+      group.dataset.firstType = field.firstType || "string";
+      group.dataset.secondType = field.secondType || "string";
+      const legend = document.createElement("legend");
+      legend.textContent = `${field.label} (${group.dataset.firstType} / ${group.dataset.secondType})`;
+      group.append(legend);
+      for (const pair of values[field.key] || []) addPairRow(group, pair);
+      const add = document.createElement("button");
+      add.type = "button";
+      add.className = "secondary";
+      add.textContent = "Add pair";
+      add.addEventListener("click", () => addPairRow(group));
+      group.append(add);
+      return group;
+    }
+
+    function arrayFor(field) {
+      const group = document.createElement("fieldset");
+      group.dataset.key = field.key;
+      group.dataset.itemType = field.itemType || "string";
+      const legend = document.createElement("legend");
+      legend.textContent = `${field.label} (${group.dataset.itemType} array)`;
+      group.append(legend);
+      for (const item of values[field.key] || []) addItemRow(group, item);
+      const add = document.createElement("button");
+      add.type = "button";
+      add.className = "secondary";
+      add.textContent = "Add item";
+      add.addEventListener("click", () => addItemRow(group));
+      group.append(add);
+      return group;
+    }
+
+    function addItemRow(group, value = "") {
+      const row = document.createElement("div");
+      row.className = "item";
+      row.append(pairInput(group.dataset.itemType, "item", value));
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "secondary";
+      remove.textContent = "Remove";
+      remove.addEventListener("click", () => row.remove());
+      row.append(remove);
+      group.insertBefore(row, group.lastElementChild?.tagName === "BUTTON" ? group.lastElementChild : null);
+    }
+
+    function addPairRow(group, pair = { first: "", second: "" }) {
+      const row = document.createElement("div");
+      row.className = "pair";
+      row.append(
+        pairInput(group.dataset.firstType, "first", pair.first),
+        pairInput(group.dataset.secondType, "second", pair.second)
+      );
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "secondary";
+      remove.textContent = "Remove";
+      remove.addEventListener("click", () => row.remove());
+      row.append(remove);
+      group.insertBefore(row, group.lastElementChild?.tagName === "BUTTON" ? group.lastElementChild : null);
+    }
+
+    function pairInput(type, part, value) {
+      const input = document.createElement("input");
+      input.dataset.part = part;
+      input.setAttribute("aria-label", `${part} ${type} value`);
+      if (type === "boolean") {
+        input.type = "checkbox";
+        input.checked = value === true || value === "true" || value === 1;
+        const label = document.createElement("label");
+        label.className = "check";
+        label.append(input, document.createTextNode(value === undefined || value === "" ? "Enabled" : String(input.checked)));
+        input.addEventListener("change", () => label.lastChild.textContent = String(input.checked));
+        return label;
+      }
+      input.type = type === "integer" ? "number" : "text";
+      input.required = type === "integer";
+      input.value = value ?? "";
+      return input;
+    }
+
+    function pairInputValue(row, part) {
+      const input = row.querySelector(`[data-part="${part}"]`);
+      return input.type === "checkbox" ? String(input.checked) : input.value;
+    }
+
+    function render() {
+      if (!fields.length && !deviceActions.length) return;
+      form.replaceChildren();
+      for (const field of fields) {
+        if (field.type === "array") {
+          form.append(arrayFor(field));
+        } else {
+          form.append(field.type === "pair_array" ? pairArrayFor(field) : inputFor(field));
+        }
+      }
+      if (fields.length) {
+        const configActions = document.createElement("div");
+        configActions.className = "actions";
+        configActions.innerHTML = `<button type="submit">Save settings</button><button type="button" class="secondary">Reload</button>`;
+        configActions.lastElementChild.addEventListener("click", async () => {
+          setMessage("Reloading...");
+          waitForPackets(["config"]);
+          try {
+            await send("CONFIG");
+          } catch (error) {
+            log(error.message, "error");
+            setMessage(error.message, true);
+          }
+        });
+        form.append(configActions);
+      }
+      if (deviceActions.length) {
+        const section = document.createElement("section");
+        section.className = "device-actions";
+        section.innerHTML = `<h2>Device actions</h2><div class="device-actions-buttons"></div>`;
+        for (const action of deviceActions) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "secondary";
+          button.textContent = action.label;
+          button.addEventListener("click", () => invokeDeviceAction(action, button));
+          section.lastElementChild.append(button);
+        }
+        form.append(section);
+      }
+    }
+
+    async function invokeDeviceAction(action, button) {
+      if (action.requiresConfirmation && !window.confirm(`Run "${action.label}" on the ESP32?`)) {
+        return;
+      }
+      button.disabled = true;
+      setMessage(`Running ${action.label}...`);
+      try {
+        await request("ACTION", action.key);
+        setMessage(`${action.label} requested.`);
+      } catch (error) {
+        log(error.message, "error");
+        setMessage(error.message, true);
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const passwordInput = form.querySelector("#access-password");
+      if (passwordInput) {
+        const unlock = form.querySelector("button[type=submit]");
+        unlock.disabled = true;
+        setMessage("Authenticating...");
+        try {
+          await authenticate(passwordInput.value);
+          passwordInput.value = "";
+          status.lastElementChild.textContent = `Connected to ${subtitle.textContent}`;
+          setMessage("Authenticated. Loading configuration...");
+          requestConfiguration();
+        } catch (error) {
+          passwordInput.value = "";
+          passwordInput.focus();
+          log(error.message, "error");
+          setMessage(error.message, true);
+        } finally {
+          unlock.disabled = false;
+        }
+        return;
+      }
+      const save = form.querySelector("button[type=submit]");
+      save.disabled = true;
+      setMessage("Saving...");
+      try {
+        for (const field of fields) {
+          if (field.type === "array") {
+            const group = [...form.querySelectorAll("fieldset")].find(item => item.dataset.key === field.key);
+            await request("CLEAR_ITEMS", field.key);
+            for (const row of group.querySelectorAll(".item")) {
+              await request("ADD_ITEM", field.key, pairInputValue(row, "item"));
+            }
+          } else if (field.type === "pair_array") {
+            const group = [...form.querySelectorAll("fieldset")].find(item => item.dataset.key === field.key);
+            await request("CLEAR_PAIRS", field.key);
+            for (const row of group.querySelectorAll(".pair")) {
+              await request("ADD_PAIR", field.key, pairInputValue(row, "first"), pairInputValue(row, "second"));
+            }
+          } else {
+            const input = form.elements.namedItem(field.key);
+            await request("SET", field.key, field.type === "boolean" ? String(input.checked) : input.value);
+          }
+        }
+        await send("CONFIG");
+        setMessage("Settings saved.");
+      } catch (error) {
+        log(error.message, "error");
+        setMessage(error.message, true);
+      } finally {
+        save.disabled = false;
+      }
+    });
+
+    serialButton.addEventListener("click", () => transport === "serial" ? disconnect() : connectSerial());
+    bleButton.addEventListener("click", () => transport === "ble" ? disconnect() : connectBle());
+    clearLogButton.addEventListener("click", () => {
+      logOutput.textContent = "";
+    });
+    navigator.serial?.addEventListener("disconnect", event => {
+      if (event.target === port) disconnect();
+    });
+  </script>
+</body>
+</html>
