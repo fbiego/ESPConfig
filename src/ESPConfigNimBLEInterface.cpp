@@ -1,48 +1,105 @@
-#include "SerialInterface.h"
+#if __has_include(<NimBLEDevice.h>)
+
+#include "ESPConfigNimBLEInterface.h"
 
 #include <cstdio>
 
 namespace ESPConfig {
 
-SerialInterface::SerialInterface(Stream& serial, Manager& manager, const String& deviceName)
-    : _serial(serial), _manager(manager), _deviceName(deviceName) {
+class ESPConfigNimBLEInterface::CommandCallbacks : public NimBLECharacteristicCallbacks {
+public:
+    explicit CommandCallbacks(ESPConfigNimBLEInterface& owner) : _owner(owner) {}
+
+    void onWrite(NimBLECharacteristic* characteristic, NimBLEConnInfo& connection) override {
+        const std::string value = characteristic->getValue();
+        _owner.receive(reinterpret_cast<const uint8_t*>(value.data()), value.length(),
+                       connection.getConnHandle(), connection.getMTU());
+    }
+
+private:
+    ESPConfigNimBLEInterface& _owner;
+};
+
+ESPConfigNimBLEInterface::ESPConfigNimBLEInterface(NimBLEServer& server, ESPConfigManager& manager, const String& deviceName)
+    : _server(server), _manager(manager), _deviceName(deviceName) {
 }
 
-void SerialInterface::setPassword(const String& password) {
+ESPConfigNimBLEInterface::~ESPConfigNimBLEInterface() {
+    delete _callbacks;
+}
+
+void ESPConfigNimBLEInterface::setPassword(const String& password) {
     _password = password;
     _authenticated = password.length() == 0;
     _failedAuthenticationAttempts = 0;
     _authenticationBlockedUntil = 0;
 }
 
-void SerialInterface::clearPassword() {
+void ESPConfigNimBLEInterface::clearPassword() {
     setPassword("");
 }
 
-bool SerialInterface::isProtected() const {
+bool ESPConfigNimBLEInterface::isProtected() const {
     return _password.length() > 0;
 }
 
-bool SerialInterface::isAuthenticated() const {
+bool ESPConfigNimBLEInterface::isAuthenticated() const {
     return _authenticated;
 }
 
-void SerialInterface::begin() {
-    _parser.reset();
-    _authenticated = !isProtected();
-    sendReady();
-}
-
-void SerialInterface::update() {
-    while (_serial.available()) {
-        const uint8_t byte = static_cast<uint8_t>(_serial.read());
-        _parser.feed(&byte, 1, [this](Protocol::PacketType type, const Protocol::Payload& payload) {
-            processPacket(type, payload);
-        });
+bool ESPConfigNimBLEInterface::begin() {
+    if (_service) {
+        return false;
     }
+
+    _service = _server.createService(ServiceUuid);
+    if (!_service) {
+        return false;
+    }
+    _commandCharacteristic = _service->createCharacteristic(
+        CommandCharacteristicUuid, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR);
+    _responseCharacteristic = _service->createCharacteristic(
+        ResponseCharacteristicUuid, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
+    if (!_commandCharacteristic || !_responseCharacteristic) {
+        return false;
+    }
+
+    _callbacks = new CommandCallbacks(*this);
+    _commandCharacteristic->setCallbacks(_callbacks);
+    _authenticated = !isProtected();
+    return true;
 }
 
-void SerialInterface::processPacket(Protocol::PacketType type, const Protocol::Payload& payload) {
+NimBLEService* ESPConfigNimBLEInterface::getService() const {
+    return _service;
+}
+
+NimBLECharacteristic* ESPConfigNimBLEInterface::getCommandCharacteristic() const {
+    return _commandCharacteristic;
+}
+
+NimBLECharacteristic* ESPConfigNimBLEInterface::getResponseCharacteristic() const {
+    return _responseCharacteristic;
+}
+
+void ESPConfigNimBLEInterface::receive(const uint8_t* data, size_t length, uint16_t connectionHandle, uint16_t mtu) {
+    if (_connectionHandle != connectionHandle) {
+        _connectionHandle = connectionHandle;
+        _connectionMtu = mtu;
+        _authenticated = !isProtected();
+        _failedAuthenticationAttempts = 0;
+        _authenticationBlockedUntil = 0;
+        _parser.reset();
+    } else {
+        _connectionMtu = mtu;
+    }
+
+    _parser.feed(data, length, [this](Protocol::PacketType type, const Protocol::Payload& payload) {
+        processPacket(type, payload);
+    });
+}
+
+void ESPConfigNimBLEInterface::processPacket(Protocol::PacketType type, const Protocol::Payload& payload) {
     if (type == Protocol::PacketType::Hello) {
         if (!payload.empty()) {
             sendError("Malformed hello packet");
@@ -77,7 +134,7 @@ void SerialInterface::processPacket(Protocol::PacketType type, const Protocol::P
     processRequest(type, payload);
 }
 
-void SerialInterface::processAuthentication(const Protocol::Payload& payload) {
+void ESPConfigNimBLEInterface::processAuthentication(const Protocol::Payload& payload) {
     Protocol::PayloadReader reader(payload);
     uint32_t requestId = 0;
     String password;
@@ -104,7 +161,7 @@ void SerialInterface::processAuthentication(const Protocol::Payload& payload) {
     sendResult(requestId, accepted, accepted ? "" : "Incorrect password");
 }
 
-void SerialInterface::processRequest(Protocol::PacketType type, const Protocol::Payload& payload) {
+void ESPConfigNimBLEInterface::processRequest(Protocol::PacketType type, const Protocol::Payload& payload) {
     Protocol::PayloadReader reader(payload);
     uint32_t requestId = 0;
     String key;
@@ -165,7 +222,7 @@ void SerialInterface::processRequest(Protocol::PacketType type, const Protocol::
     sendResult(requestId, ok, message);
 }
 
-bool SerialInterface::passwordMatches(const String& candidate) const {
+bool ESPConfigNimBLEInterface::passwordMatches(const String& candidate) const {
     const size_t maximumLength = max(_password.length(), candidate.length());
     size_t difference = _password.length() ^ candidate.length();
     for (size_t i = 0; i < maximumLength; ++i) {
@@ -176,25 +233,27 @@ bool SerialInterface::passwordMatches(const String& candidate) const {
     return difference == 0;
 }
 
-void SerialInterface::sendReady() {
+void ESPConfigNimBLEInterface::sendReady() {
     sendPacket(Protocol::PacketType::Ready,
-               "{\"type\":\"ready\",\"protocol\":4,\"device\":\"" + escapeJson(_deviceName) +
+               "{\"type\":\"ready\",\"protocol\":" + String(ProtocolVersion) +
+               ",\"libraryVersion\":\"" + LibraryVersion +
+               "\",\"transport\":\"ble\",\"device\":\"" + escapeJson(_deviceName) +
                "\",\"protected\":" + (isProtected() ? "true" : "false") +
                ",\"authenticated\":" + (_authenticated ? "true" : "false") + "}");
 }
 
-void SerialInterface::sendSchema() {
+void ESPConfigNimBLEInterface::sendSchema() {
     sendPacket(Protocol::PacketType::Schema,
                "{\"type\":\"schema\",\"fields\":" + _manager.schemaJson() +
                ",\"actions\":" + _manager.actionsJson() + "}");
 }
 
-void SerialInterface::sendConfig() {
+void ESPConfigNimBLEInterface::sendConfig() {
     sendPacket(Protocol::PacketType::Config,
                "{\"type\":\"config\",\"values\":" + _manager.toJson() + "}");
 }
 
-void SerialInterface::sendResult(uint32_t requestId, bool ok, const String& message) {
+void ESPConfigNimBLEInterface::sendResult(uint32_t requestId, bool ok, const String& message) {
     String packet = "{\"type\":\"result\",\"id\":" + String(requestId) +
                     ",\"ok\":" + (ok ? "true" : "false");
     if (!ok) {
@@ -203,19 +262,26 @@ void SerialInterface::sendResult(uint32_t requestId, bool ok, const String& mess
     sendPacket(Protocol::PacketType::Result, packet + "}");
 }
 
-void SerialInterface::sendError(const String& message) {
+void ESPConfigNimBLEInterface::sendError(const String& message) {
     sendPacket(Protocol::PacketType::Error,
                "{\"type\":\"error\",\"message\":\"" + escapeJson(message) + "\"}");
 }
 
-void SerialInterface::sendPacket(Protocol::PacketType type, const String& json) {
+void ESPConfigNimBLEInterface::sendPacket(Protocol::PacketType type, const String& json) {
+    if (!_responseCharacteristic) {
+        return;
+    }
     const Protocol::Payload packet = Protocol::frame(type, json);
-    if (!packet.empty()) {
-        _serial.write(packet.data(), packet.size());
+    const size_t chunkSize = min(MaxNotificationChunkSize,
+                                 max(static_cast<size_t>(20), static_cast<size_t>(_connectionMtu - 3)));
+    for (size_t offset = 0; offset < packet.size(); offset += chunkSize) {
+        const size_t length = min(chunkSize, packet.size() - offset);
+        _responseCharacteristic->notify(packet.data() + offset, length, _connectionHandle);
+        delay(3);
     }
 }
 
-String SerialInterface::escapeJson(const String& value) const {
+String ESPConfigNimBLEInterface::escapeJson(const String& value) const {
     String escaped;
     for (size_t i = 0; i < value.length(); ++i) {
         const char c = value[i];
@@ -242,3 +308,5 @@ String SerialInterface::escapeJson(const String& value) const {
 }
 
 } // namespace ESPConfig
+
+#endif

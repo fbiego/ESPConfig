@@ -3,15 +3,18 @@
 ESPConfig exposes configurable ESP32 properties and device actions to an
 external browser configurator. The ESP32 does not host a webpage.
 
+Current library version: **1.1.0**
+
 Supported transports:
 
-- USB serial through `SerialInterface`
-- Bluetooth Low Energy through optional NimBLE `NimBLEInterface`
+- USB serial through `ESPConfigSerialInterface`
+- Bluetooth Low Energy through optional NimBLE `ESPConfigNimBLEInterface`
 - Shared framed binary protocol with CRC-16
 
 Supported configuration types:
 
 - String, integer, and boolean fields
+- Text, number, slider, switch, and color controls
 - Typed arrays
 - Typed pair arrays
 - Device action buttons
@@ -21,10 +24,10 @@ Supported configuration types:
 
 ```cpp
 #include <ESPConfig.h>
-#include <SerialInterface.h>
+#include <ESPConfigSerialInterface.h>
 
-ESPConfig::Manager config;
-ESPConfig::SerialInterface configSerial(Serial, config, "My ESP32");
+ESPConfig::ESPConfigManager config;
+ESPConfig::ESPConfigSerialInterface configSerial(Serial, config, "My ESP32");
 
 void setup() {
   Serial.begin(115200);
@@ -41,7 +44,14 @@ void loop() {
 }
 ```
 
-Serve the external configurator:
+Open the hosted configurator:
+
+<https://fbiego.com/espconfig/>
+
+The page displays its own version and detects the connected ESPConfig library
+and protocol versions during the handshake.
+
+Alternatively, serve it locally for development:
 
 ```sh
 python3 -m http.server 8000

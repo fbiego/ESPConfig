@@ -5,7 +5,22 @@
 
 namespace ESPConfig {
 
-void Manager::addInteger(const String& key, const String& label, int defaultValue, bool required,
+namespace {
+bool isHexColor(const String& value) {
+    if (value.length() != 7 || value[0] != '#') {
+        return false;
+    }
+    for (size_t i = 1; i < value.length(); ++i) {
+        const char c = value[i];
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) {
+            return false;
+        }
+    }
+    return true;
+}
+} // namespace
+
+void ESPConfigManager::addInteger(const String& key, const String& label, int defaultValue, bool required,
                          std::function<bool(const String&)> validator) {
     ConfigField field;
     field.key = key;
@@ -18,7 +33,7 @@ void Manager::addInteger(const String& key, const String& label, int defaultValu
     _fields.push_back(field);
 }
 
-void Manager::addString(const String& key, const String& label, const String& defaultValue, bool required,
+void ESPConfigManager::addString(const String& key, const String& label, const String& defaultValue, bool required,
                         std::function<bool(const String&)> validator) {
     ConfigField field;
     field.key = key;
@@ -30,7 +45,7 @@ void Manager::addString(const String& key, const String& label, const String& de
     _fields.push_back(field);
 }
 
-void Manager::addBoolean(const String& key, const String& label, bool defaultValue, bool required,
+void ESPConfigManager::addBoolean(const String& key, const String& label, bool defaultValue, bool required,
                          std::function<bool(const String&)> validator) {
     ConfigField field;
     field.key = key;
@@ -43,7 +58,7 @@ void Manager::addBoolean(const String& key, const String& label, bool defaultVal
     _fields.push_back(field);
 }
 
-void Manager::addArray(const String& key, const String& label, ValueType itemType, bool required) {
+void ESPConfigManager::addArray(const String& key, const String& label, ValueType itemType, bool required) {
     ConfigField field;
     field.key = key;
     field.label = label;
@@ -53,11 +68,11 @@ void Manager::addArray(const String& key, const String& label, ValueType itemTyp
     _fields.push_back(field);
 }
 
-void Manager::addPairArray(const String& key, const String& label, bool required) {
+void ESPConfigManager::addPairArray(const String& key, const String& label, bool required) {
     addPairArray(key, label, ValueType::String, ValueType::String, required);
 }
 
-void Manager::addPairArray(const String& key, const String& label, ValueType firstType,
+void ESPConfigManager::addPairArray(const String& key, const String& label, ValueType firstType,
                            ValueType secondType, bool required) {
     ConfigField field;
     field.key = key;
@@ -69,14 +84,14 @@ void Manager::addPairArray(const String& key, const String& label, ValueType fir
     _fields.push_back(field);
 }
 
-void Manager::setOnChange(const String& key, ChangeHandler handler) {
+void ESPConfigManager::setOnChange(const String& key, ChangeHandler handler) {
     ConfigField* field = fieldByKey(key);
     if (field) {
         field->onChange = handler;
     }
 }
 
-void Manager::setOnChange(const String& key, std::function<void()> handler) {
+void ESPConfigManager::setOnChange(const String& key, std::function<void()> handler) {
     if (!handler) {
         setOnChange(key, ChangeHandler());
         return;
@@ -86,7 +101,62 @@ void Manager::setOnChange(const String& key, std::function<void()> handler) {
     });
 }
 
-void Manager::addAction(const String& key, const String& label, std::function<void()> handler,
+void ESPConfigManager::setOnChange(ChangeHandler handler) {
+    _onChange = handler;
+}
+
+void ESPConfigManager::setOnChange(std::function<void()> handler) {
+    if (!handler) {
+        setOnChange(ChangeHandler());
+        return;
+    }
+    setOnChange([handler](const ConfigField&) {
+        handler();
+    });
+}
+
+bool ESPConfigManager::setSlider(const String& key, int minimum, int maximum, int step) {
+    ConfigField* field = fieldByKey(key);
+    if (!field || field->type != FieldType::Integer || maximum < minimum || step <= 0 ||
+        field->intValue < minimum || field->intValue > maximum ||
+        (field->intValue - minimum) % step != 0) {
+        return false;
+    }
+    field->control = ControlType::Slider;
+    field->minimum = minimum;
+    field->maximum = maximum;
+    field->step = step;
+    return true;
+}
+
+bool ESPConfigManager::setSwitch(const String& key) {
+    ConfigField* field = fieldByKey(key);
+    if (!field || field->type != FieldType::Boolean) {
+        return false;
+    }
+    field->control = ControlType::Switch;
+    return true;
+}
+
+bool ESPConfigManager::setColorPicker(const String& key) {
+    ConfigField* field = fieldByKey(key);
+    if (!field || field->type != FieldType::String || !isHexColor(field->value)) {
+        return false;
+    }
+    field->control = ControlType::Color;
+    return true;
+}
+
+bool ESPConfigManager::setImmediateUpdate(const String& key, bool enabled) {
+    ConfigField* field = fieldByKey(key);
+    if (!field || field->type == FieldType::Array || field->type == FieldType::PairArray) {
+        return false;
+    }
+    field->immediateUpdate = enabled;
+    return true;
+}
+
+void ESPConfigManager::addAction(const String& key, const String& label, std::function<void()> handler,
                         bool requiresConfirmation) {
     ConfigAction action;
     action.key = key;
@@ -96,7 +166,7 @@ void Manager::addAction(const String& key, const String& label, std::function<vo
     _actions.push_back(action);
 }
 
-bool Manager::setFieldValue(const String& key, const String& value) {
+bool ESPConfigManager::setFieldValue(const String& key, const String& value) {
     ConfigField* field = fieldByKey(key);
     if (!field || field->type == FieldType::Array || field->type == FieldType::PairArray ||
         (field->required && value.length() == 0)) {
@@ -113,11 +183,19 @@ bool Manager::setFieldValue(const String& key, const String& value) {
             if (value.length() == 0 || end == value.c_str() || *end != '\0') {
                 return false;
             }
+            if (field->control == ControlType::Slider &&
+                (parsed < field->minimum || parsed > field->maximum ||
+                 (parsed - field->minimum) % field->step != 0)) {
+                return false;
+            }
             field->intValue = static_cast<int>(parsed);
             field->value = String(field->intValue);
             break;
         }
         case FieldType::String:
+            if (field->control == ControlType::Color && !isHexColor(value)) {
+                return false;
+            }
             field->value = value;
             break;
         case FieldType::Boolean:
@@ -136,13 +214,11 @@ bool Manager::setFieldValue(const String& key, const String& value) {
             return false;
     }
 
-    if (field->onChange) {
-        field->onChange(*field);
-    }
+    notifyChanged(*field);
     return true;
 }
 
-bool Manager::addItem(const String& key, const String& value) {
+bool ESPConfigManager::addItem(const String& key, const String& value) {
     ConfigField* field = fieldByKey(key);
     if (!field || field->type != FieldType::Array) {
         return false;
@@ -152,25 +228,21 @@ bool Manager::addItem(const String& key, const String& value) {
         return false;
     }
     field->items.push_back(normalized);
-    if (field->onChange) {
-        field->onChange(*field);
-    }
+    notifyChanged(*field);
     return true;
 }
 
-bool Manager::clearItems(const String& key) {
+bool ESPConfigManager::clearItems(const String& key) {
     ConfigField* field = fieldByKey(key);
     if (!field || field->type != FieldType::Array) {
         return false;
     }
     field->items.clear();
-    if (field->onChange) {
-        field->onChange(*field);
-    }
+    notifyChanged(*field);
     return true;
 }
 
-bool Manager::addPair(const String& key, const String& first, const String& second) {
+bool ESPConfigManager::addPair(const String& key, const String& first, const String& second) {
     ConfigField* field = fieldByKey(key);
     if (!field || field->type != FieldType::PairArray) {
         return false;
@@ -182,25 +254,21 @@ bool Manager::addPair(const String& key, const String& first, const String& seco
         return false;
     }
     field->pairs.emplace_back(normalizedFirst, normalizedSecond);
-    if (field->onChange) {
-        field->onChange(*field);
-    }
+    notifyChanged(*field);
     return true;
 }
 
-bool Manager::clearPairs(const String& key) {
+bool ESPConfigManager::clearPairs(const String& key) {
     ConfigField* field = fieldByKey(key);
     if (!field || field->type != FieldType::PairArray) {
         return false;
     }
     field->pairs.clear();
-    if (field->onChange) {
-        field->onChange(*field);
-    }
+    notifyChanged(*field);
     return true;
 }
 
-bool Manager::hasAction(const String& key) const {
+bool ESPConfigManager::hasAction(const String& key) const {
     for (const ConfigAction& action : _actions) {
         if (action.key == key && action.handler) {
             return true;
@@ -209,7 +277,7 @@ bool Manager::hasAction(const String& key) const {
     return false;
 }
 
-bool Manager::invokeAction(const String& key) {
+bool ESPConfigManager::invokeAction(const String& key) {
     for (const ConfigAction& action : _actions) {
         if (action.key == key && action.handler) {
             action.handler();
@@ -219,7 +287,7 @@ bool Manager::invokeAction(const String& key) {
     return false;
 }
 
-String Manager::toJson() const {
+String ESPConfigManager::toJson() const {
     String json = "{";
     for (size_t i = 0; i < _fields.size(); ++i) {
         const ConfigField& field = _fields[i];
@@ -264,7 +332,7 @@ String Manager::toJson() const {
     return json;
 }
 
-String Manager::schemaJson() const {
+String ESPConfigManager::schemaJson() const {
     String json = "[";
     for (size_t i = 0; i < _fields.size(); ++i) {
         const ConfigField& field = _fields[i];
@@ -273,6 +341,17 @@ String Manager::schemaJson() const {
         json += "\"type\":\"" + fieldTypeName(field.type) + "\",";
         json += "\"required\":";
         json += field.required ? "true" : "false";
+        if (field.immediateUpdate) {
+            json += ",\"immediateUpdate\":true";
+        }
+        if (field.control != ControlType::Default) {
+            json += ",\"control\":\"" + controlTypeName(field.control) + "\"";
+        }
+        if (field.control == ControlType::Slider) {
+            json += ",\"minimum\":" + String(field.minimum);
+            json += ",\"maximum\":" + String(field.maximum);
+            json += ",\"step\":" + String(field.step);
+        }
         if (field.type == FieldType::Array) {
             json += ",\"itemType\":\"" + valueTypeName(field.itemType) + "\"";
         } else if (field.type == FieldType::PairArray) {
@@ -288,7 +367,7 @@ String Manager::schemaJson() const {
     return json;
 }
 
-String Manager::actionsJson() const {
+String ESPConfigManager::actionsJson() const {
     String json = "[";
     for (size_t i = 0; i < _actions.size(); ++i) {
         const ConfigAction& action = _actions[i];
@@ -305,15 +384,15 @@ String Manager::actionsJson() const {
     return json;
 }
 
-const ConfigField* Manager::getField(const String& key) const {
+const ConfigField* ESPConfigManager::getField(const String& key) const {
     return fieldByKey(key);
 }
 
-const std::vector<ConfigField>& Manager::getFields() const {
+const std::vector<ConfigField>& ESPConfigManager::getFields() const {
     return _fields;
 }
 
-ConfigField* Manager::fieldByKey(const String& key) {
+ConfigField* ESPConfigManager::fieldByKey(const String& key) {
     for (ConfigField& field : _fields) {
         if (field.key == key) {
             return &field;
@@ -322,7 +401,7 @@ ConfigField* Manager::fieldByKey(const String& key) {
     return nullptr;
 }
 
-const ConfigField* Manager::fieldByKey(const String& key) const {
+const ConfigField* ESPConfigManager::fieldByKey(const String& key) const {
     for (const ConfigField& field : _fields) {
         if (field.key == key) {
             return &field;
@@ -331,7 +410,16 @@ const ConfigField* Manager::fieldByKey(const String& key) const {
     return nullptr;
 }
 
-String Manager::escapeJson(const String& value) const {
+void ESPConfigManager::notifyChanged(const ConfigField& field) {
+    if (field.onChange) {
+        field.onChange(field);
+    }
+    if (_onChange) {
+        _onChange(field);
+    }
+}
+
+String ESPConfigManager::escapeJson(const String& value) const {
     String escaped;
     for (size_t i = 0; i < value.length(); ++i) {
         const char c = value[i];
@@ -357,7 +445,7 @@ String Manager::escapeJson(const String& value) const {
     return escaped;
 }
 
-String Manager::fieldTypeName(FieldType type) const {
+String ESPConfigManager::fieldTypeName(FieldType type) const {
     switch (type) {
         case FieldType::Integer: return "integer";
         case FieldType::String: return "string";
@@ -368,7 +456,7 @@ String Manager::fieldTypeName(FieldType type) const {
     return "unknown";
 }
 
-String Manager::valueTypeName(ValueType type) const {
+String ESPConfigManager::valueTypeName(ValueType type) const {
     switch (type) {
         case ValueType::String: return "string";
         case ValueType::Integer: return "integer";
@@ -377,7 +465,17 @@ String Manager::valueTypeName(ValueType type) const {
     return "unknown";
 }
 
-bool Manager::normalizeValue(ValueType type, const String& input, String& output) const {
+String ESPConfigManager::controlTypeName(ControlType type) const {
+    switch (type) {
+        case ControlType::Default: return "default";
+        case ControlType::Slider: return "slider";
+        case ControlType::Switch: return "switch";
+        case ControlType::Color: return "color";
+    }
+    return "default";
+}
+
+bool ESPConfigManager::normalizeValue(ValueType type, const String& input, String& output) const {
     switch (type) {
         case ValueType::String:
             output = input;
@@ -405,7 +503,7 @@ bool Manager::normalizeValue(ValueType type, const String& input, String& output
     return false;
 }
 
-String Manager::valueJson(ValueType type, const String& value) const {
+String ESPConfigManager::valueJson(ValueType type, const String& value) const {
     if (type == ValueType::String) {
         return "\"" + escapeJson(value) + "\"";
     }

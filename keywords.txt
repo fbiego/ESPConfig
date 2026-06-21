@@ -1,0 +1,76 @@
+#######################################
+# Datatypes (KEYWORD1)
+#######################################
+
+ESPConfig	KEYWORD1
+ESPConfigManager	KEYWORD1
+ESPConfigSerialInterface	KEYWORD1
+ESPConfigNimBLEInterface	KEYWORD1
+ConfigField	KEYWORD1
+ConfigAction	KEYWORD1
+FieldType	KEYWORD1
+ValueType	KEYWORD1
+PairValueType	KEYWORD1
+ControlType	KEYWORD1
+ChangeHandler	KEYWORD1
+
+#######################################
+# Methods (KEYWORD2)
+#######################################
+
+addInteger	KEYWORD2
+addString	KEYWORD2
+addBoolean	KEYWORD2
+addArray	KEYWORD2
+addPairArray	KEYWORD2
+setOnChange	KEYWORD2
+setSlider	KEYWORD2
+setSwitch	KEYWORD2
+setColorPicker	KEYWORD2
+setImmediateUpdate	KEYWORD2
+addAction	KEYWORD2
+setFieldValue	KEYWORD2
+addItem	KEYWORD2
+clearItems	KEYWORD2
+addPair	KEYWORD2
+clearPairs	KEYWORD2
+hasAction	KEYWORD2
+invokeAction	KEYWORD2
+toJson	KEYWORD2
+schemaJson	KEYWORD2
+actionsJson	KEYWORD2
+getField	KEYWORD2
+getFields	KEYWORD2
+setPassword	KEYWORD2
+clearPassword	KEYWORD2
+isProtected	KEYWORD2
+isAuthenticated	KEYWORD2
+begin	KEYWORD2
+update	KEYWORD2
+getService	KEYWORD2
+getCommandCharacteristic	KEYWORD2
+getResponseCharacteristic	KEYWORD2
+
+#######################################
+# Constants and enum values (LITERAL1)
+#######################################
+
+ESPCONFIG_VERSION	LITERAL1
+ESPCONFIG_VERSION_MAJOR	LITERAL1
+ESPCONFIG_VERSION_MINOR	LITERAL1
+ESPCONFIG_VERSION_PATCH	LITERAL1
+ESPCONFIG_PROTOCOL_VERSION	LITERAL1
+LibraryVersion	LITERAL1
+ProtocolVersion	LITERAL1
+Integer	LITERAL1
+String	LITERAL1
+Boolean	LITERAL1
+Array	LITERAL1
+PairArray	LITERAL1
+Default	LITERAL1
+Slider	LITERAL1
+Switch	LITERAL1
+Color	LITERAL1
+ServiceUuid	LITERAL1
+CommandCharacteristicUuid	LITERAL1
+ResponseCharacteristicUuid	LITERAL1

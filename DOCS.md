@@ -4,12 +4,29 @@ ESPConfig separates a transport-independent configuration registry from Serial
 and NimBLE transports. The external page in [`web/index.html`](web/index.html)
 discovers the registry and renders the configuration interface.
 
+## Public Class Names
+
+The primary public classes use an `ESPConfig` prefix to avoid collisions with
+other Arduino libraries:
+
+- `ESPConfigManager`
+- `ESPConfigSerialInterface`
+- `ESPConfigNimBLEInterface`
+
+They remain inside the `ESPConfig` namespace, so code can either use the fully
+qualified names or `using namespace ESPConfig`.
+
+The generic `Manager` name has been removed. The legacy `SerialInterface.h` and
+`NimBLEInterface.h` headers provide opt-in compatibility aliases, but the new
+prefixed headers expose only prefixed class names and cannot introduce those
+generic symbols into a sketch.
+
 ## Configuration Registry
 
 Create one manager and register fields before starting a transport:
 
 ```cpp
-ESPConfig::Manager config;
+ESPConfig::ESPConfigManager config;
 
 config.addString("device_name", "Device name", "Sensor", true);
 config.addInteger("sample_seconds", "Sample interval", 60);
@@ -19,13 +36,27 @@ config.addBoolean("enabled", "Enabled", true);
 The final boolean argument marks a field as required. Integer and scalar fields
 can also receive validators.
 
-Use `setOnChange()` to apply or persist changes:
+Use a named function when a specific field needs its own behavior:
 
 ```cpp
-config.setOnChange("sample_seconds", [](const ESPConfig::ConfigField& field) {
+void sampleIntervalChanged(const ESPConfig::ConfigField& field) {
   const int updatedValue = field.intValue;
   // Apply or persist updatedValue.
-});
+}
+
+config.setOnChange("sample_seconds", sampleIntervalChanged);
+```
+
+Register a generic callback without a key to observe every configuration
+change:
+
+```cpp
+void anyConfigChanged(const ESPConfig::ConfigField& field) {
+  // field.key identifies the property that changed.
+  // Persist the field or mark the complete configuration as dirty.
+}
+
+config.setOnChange(anyConfigChanged);
 ```
 
 The callback runs after the new value has been validated and stored. Its
@@ -37,9 +68,88 @@ The callback runs after the new value has been validated and stored. Its
 - Array: `field.items`
 - Pair array: `field.pairs`
 
+When both are registered, the field-specific callback runs first, followed by
+the generic callback. Array add/clear and pair add/clear operations also invoke
+both callbacks.
+
 No-argument callbacks remain supported for code that does not need the value.
 
 ESPConfig intentionally does not select a persistence mechanism.
+
+## Version Detection
+
+The public version constants are available from `ESPConfig.h`:
+
+```cpp
+Serial.println(ESPCONFIG_VERSION);
+Serial.println(ESPConfig::LibraryVersion);
+Serial.println(ESPConfig::ProtocolVersion);
+```
+
+The current values are:
+
+- Library: `1.1.0`
+- Protocol API: `4`
+- Binary frame format: `1`
+- Web configurator: `1.1.0`
+
+Serial and BLE ready packets include `libraryVersion` and `protocol`. The web
+configurator displays its own version before connecting, then displays the
+detected library and protocol versions after the handshake. It refuses to load
+configuration data when the device reports an incompatible protocol API.
+
+Release version changes must keep `library.properties` and
+`src/ESPConfigVersion.h` synchronized.
+
+## Field Controls
+
+Fields use standard text, number, and checkbox inputs by default. Optional
+control metadata changes how the external configurator renders a scalar field:
+
+```cpp
+config.addInteger("brightness", "Brightness", 50);
+config.setSlider("brightness", 0, 100, 5);
+
+config.addBoolean("enabled", "Enabled", true);
+config.setSwitch("enabled");
+
+config.addString("accent_color", "Accent color", "#087f68");
+config.setColorPicker("accent_color");
+```
+
+- `setSlider()` accepts integer fields and enforces its minimum, maximum, and
+  step on the ESP32 as well as in the browser.
+- `setSwitch()` accepts boolean fields.
+- `setColorPicker()` accepts string fields whose current and future values use
+  the `#RRGGBB` format.
+
+Each method returns `false` if the key does not exist, the field type is
+incompatible, or its current value does not satisfy the control constraints.
+These controls change presentation only; callbacks and stored value types stay
+the same.
+
+### Immediate Updates
+
+Scalar fields normally wait for **Save settings**. Enable immediate updates for
+selected fields:
+
+```cpp
+config.setImmediateUpdate("enabled");
+config.setImmediateUpdate("brightness");
+config.setImmediateUpdate("accent_color");
+```
+
+The page sends these fields when their control emits a change event. Successful
+updates invoke the normal field-specific and generic callbacks immediately.
+Rejected updates restore the previous value in the page.
+
+`setImmediateUpdate()` supports string, integer, and boolean fields and returns
+`false` for unknown keys, arrays, or pair arrays. Pass `false` as the second
+argument to return a field to the normal Save Settings flow:
+
+```cpp
+config.setImmediateUpdate("brightness", false);
+```
 
 ## Typed Arrays
 
@@ -93,7 +203,7 @@ configSerial.setPassword("replace-with-device-password");
 configSerial.begin();
 ```
 
-The same methods are available on `NimBLEInterface`:
+The same methods are available on `ESPConfigNimBLEInterface`:
 
 - `setPassword(password)`
 - `clearPassword()`
@@ -112,10 +222,10 @@ application.
 
 ```cpp
 #include <ESPConfig.h>
-#include <SerialInterface.h>
+#include <ESPConfigSerialInterface.h>
 
-ESPConfig::Manager config;
-ESPConfig::SerialInterface configSerial(Serial, config, "My ESP32");
+ESPConfig::ESPConfigManager config;
+ESPConfig::ESPConfigSerialInterface configSerial(Serial, config, "My ESP32");
 
 void setup() {
   Serial.begin(115200);
@@ -128,32 +238,34 @@ void loop() {
 }
 ```
 
-Only `SerialInterface` should read from its selected serial stream. Avoid
-writing application logs to that stream because they can interrupt a binary
-frame. Use another UART or disable logs while a configuration client is active.
+Only `ESPConfigSerialInterface` should read from its selected serial stream.
+Avoid writing application logs to that stream because they can interrupt a
+binary frame. Use another UART or disable logs while a configuration client is
+active. `begin()` writes a short human-readable ready banner before sending the
+first binary protocol frame.
 
 ## NimBLE Transport
 
 Install `NimBLE-Arduino` before using the optional BLE transport.
 
-`NimBLEInterface` only adds the service and required characteristics to a
-user-provided `NimBLEServer`. The application owns NimBLE initialization,
+`ESPConfigNimBLEInterface` only adds the service and required characteristics
+to a user-provided `NimBLEServer`. The application owns NimBLE initialization,
 server creation, advertising, connection callbacks, and BLE security.
 
 ```cpp
 #include <NimBLEDevice.h>
-#include <NimBLEInterface.h>
+#include <ESPConfigNimBLEInterface.h>
 
 NimBLEDevice::init("ESPConfig My ESP32");
 NimBLEServer* server = NimBLEDevice::createServer();
 
-ESPConfig::NimBLEInterface configBle(*server, config, "My ESP32");
+ESPConfig::ESPConfigNimBLEInterface configBle(*server, config, "My ESP32");
 configBle.setPassword("configuration-password");
 configBle.begin();
 
 NimBLEAdvertising* advertising = NimBLEDevice::getAdvertising();
 advertising->enableScanResponse(true);
-advertising->addServiceUUID(ESPConfig::NimBLEInterface::ServiceUuid);
+advertising->addServiceUUID(ESPConfig::ESPConfigNimBLEInterface::ServiceUuid);
 advertising->setName("ESPConfig My ESP32");
 advertising->start();
 ```
@@ -163,7 +275,8 @@ for a complete example with advertising diagnostics.
 
 ### Current BLE UUIDs
 
-These values match [`NimBLEInterface.h`](src/NimBLEInterface.h) and the external
+These values match
+[`ESPConfigNimBLEInterface.h`](src/ESPConfigNimBLEInterface.h) and the external
 configurator:
 
 ```text
@@ -174,9 +287,9 @@ Response: fb1e4005-54ae-4a28-9f74-dfccb248601d  read/notify
 
 Clients may split commands across BLE writes. Responses may be split across
 notifications according to the negotiated MTU and must be reassembled through
-the frame length in the binary header. `NimBLEInterface` maintains one active
-configuration client session; commands from a different connection start a new
-locked session.
+the frame length in the binary header. `ESPConfigNimBLEInterface` maintains one
+active configuration client session; commands from a different connection
+start a new locked session.
 
 ## External Configurator
 

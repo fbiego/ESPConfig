@@ -1,12 +1,23 @@
 #include <Arduino.h>
 #include <ESPConfig.h>
-#include <SerialInterface.h>
+#include <ESPConfigSerialInterface.h>
 
 using namespace ESPConfig;
 
-Manager config;
-SerialInterface configSerial(Serial, config, "ESP32 demo");
+ESPConfigManager config;
+ESPConfigSerialInterface configSerial(Serial, config, "ESP32 demo");
 String activeWifiSsid;
+String lastChangedKey;
+
+void handleWifiSsidChanged(const ConfigField& field) {
+  activeWifiSsid = field.value;
+  // Apply or persist activeWifiSsid here. Avoid writing to Serial in callbacks.
+}
+
+void handleAnyConfigChanged(const ConfigField& field) {
+  lastChangedKey = field.key;
+  // Persist the changed field or mark the complete configuration as dirty.
+}
 
 void setup() {
   Serial.begin(115200);
@@ -15,6 +26,7 @@ void setup() {
   config.addString("wifi_ssid", "WiFi SSID", "", true);
   config.addString("wifi_password", "WiFi Password");
   config.addBoolean("wifi_enabled", "Enable WiFi", true);
+  config.addString("accent_color", "Accent Color", "#087f68");
   config.addInteger("update_interval", "Update Interval Seconds", 60, false, [](const String& value) {
     const int number = value.toInt();
     return number >= 10 && number <= 3600;
@@ -24,10 +36,15 @@ void setup() {
   config.addPairArray("wifi_credentials", "Backup WiFi Credentials");
   config.addPairArray("channel_enabled", "Enabled Channels", ValueType::Integer, ValueType::Boolean);
 
-  config.setOnChange("wifi_ssid", [](const ConfigField& field) {
-    activeWifiSsid = field.value;
-    // Apply or persist activeWifiSsid here. Avoid writing to Serial in callbacks.
-  });
+  config.setSwitch("wifi_enabled");
+  config.setColorPicker("accent_color");
+  config.setSlider("update_interval", 10, 3600, 10);
+  config.setImmediateUpdate("wifi_enabled");
+  config.setImmediateUpdate("accent_color");
+  config.setImmediateUpdate("update_interval");
+
+  config.setOnChange("wifi_ssid", handleWifiSsidChanged);
+  config.setOnChange(handleAnyConfigChanged);
 
   config.addAction("identify", "Identify Device", []() {
     // Trigger an LED, buzzer, or another identify mechanism here.

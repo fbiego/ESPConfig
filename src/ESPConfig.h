@@ -4,6 +4,8 @@
 #include <functional>
 #include <vector>
 
+#include "ESPConfigVersion.h"
+
 namespace ESPConfig {
 
 enum class FieldType {
@@ -18,6 +20,13 @@ enum class ValueType {
     String,
     Integer,
     Boolean
+};
+
+enum class ControlType {
+    Default,
+    Slider,
+    Switch,
+    Color
 };
 
 using PairValueType = ValueType;
@@ -38,6 +47,11 @@ struct ConfigField {
     std::vector<std::pair<String, String>> pairs;
     ValueType firstPairType = ValueType::String;
     ValueType secondPairType = ValueType::String;
+    ControlType control = ControlType::Default;
+    int minimum = 0;
+    int maximum = 100;
+    int step = 1;
+    bool immediateUpdate = false;
     std::function<bool(const String&)> validator;
     ChangeHandler onChange;
 };
@@ -49,7 +63,7 @@ struct ConfigAction {
     std::function<void()> handler;
 };
 
-class Manager {
+class ESPConfigManager {
 public:
     void addInteger(const String& key, const String& label, int defaultValue = 0, bool required = false,
                     std::function<bool(const String&)> validator = nullptr);
@@ -65,6 +79,12 @@ public:
 
     void setOnChange(const String& key, ChangeHandler handler);
     void setOnChange(const String& key, std::function<void()> handler);
+    void setOnChange(ChangeHandler handler);
+    void setOnChange(std::function<void()> handler);
+    bool setSlider(const String& key, int minimum, int maximum, int step = 1);
+    bool setSwitch(const String& key);
+    bool setColorPicker(const String& key);
+    bool setImmediateUpdate(const String& key, bool enabled = true);
     void addAction(const String& key, const String& label, std::function<void()> handler,
                    bool requiresConfirmation = false);
 
@@ -85,11 +105,14 @@ public:
 private:
     std::vector<ConfigField> _fields;
     std::vector<ConfigAction> _actions;
+    ChangeHandler _onChange;
 
     ConfigField* fieldByKey(const String& key);
     const ConfigField* fieldByKey(const String& key) const;
+    void notifyChanged(const ConfigField& field);
     String fieldTypeName(FieldType type) const;
     String valueTypeName(ValueType type) const;
+    String controlTypeName(ControlType type) const;
     bool normalizeValue(ValueType type, const String& input, String& output) const;
     String valueJson(ValueType type, const String& value) const;
     String escapeJson(const String& value) const;

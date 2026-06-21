@@ -1,12 +1,12 @@
 #include <Arduino.h>
 #include <NimBLEDevice.h>
 #include <ESPConfig.h>
-#include <NimBLEInterface.h>
+#include <ESPConfigNimBLEInterface.h>
 
 using namespace ESPConfig;
 
-Manager config;
-NimBLEInterface* configBle = nullptr;
+ESPConfigManager config;
+ESPConfigNimBLEInterface* configBle = nullptr;
 
 class MyServerCallbacks: public BLEServerCallbacks {
     void onConnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo) {
@@ -36,7 +36,7 @@ void setup() {
   NimBLEDevice::setMTU(517);
   server->setCallbacks(new MyServerCallbacks(), false);
 
-  configBle = new NimBLEInterface(*server, config, "ESP32 BLE demo");
+  configBle = new ESPConfigNimBLEInterface(*server, config, "ESP32 BLE demo");
   configBle->setPassword("change-me");
   if (!configBle->begin()) {
     Serial.println("Failed to start ESPConfig BLE service");
@@ -44,7 +44,7 @@ void setup() {
   }
 
   NimBLEAdvertising* advertising = NimBLEDevice::getAdvertising();
-  advertising->addServiceUUID(NimBLEInterface::ServiceUuid);
+  advertising->addServiceUUID(ESPConfigNimBLEInterface::ServiceUuid);
   advertising->enableScanResponse(true);
   advertising->setPreferredParams(0x06, 0x12);
   advertising->setName("ESPConfig");

@@ -1,0 +1,36 @@
+{
+  "name": "ESPConfig",
+  "version": "1.1.0",
+  "description": "Expose ESP32 configuration fields and actions to an external browser over binary Serial or NimBLE transports.",
+  "keywords": [
+    "esp32",
+    "configuration",
+    "web serial",
+    "web bluetooth",
+    "ble",
+    "nimble"
+  ],
+  "homepage": "https://fbiego.com/espconfig/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fbiego/ESPConfig.git"
+  },
+  "authors": [
+    {
+      "name": "Felix Biego",
+      "email": "fbiego.fb@gmail.com",
+      "maintainer": true
+    }
+  ],
+  "license": "MIT",
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "dependencies": {
+    "h2zero/NimBLE-Arduino": "^2.1.0"
+  },
+  "headers": [
+    "ESPConfig.h",
+    "ESPConfigSerialInterface.h",
+    "ESPConfigNimBLEInterface.h"
+  ]
+}

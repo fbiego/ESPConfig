@@ -24,6 +24,7 @@
     .connect-actions { display: flex; flex-wrap: wrap; gap: 9px; justify-content: end; }
     h1 { margin: 0 0 6px; font-size: clamp(2rem, 8vw, 3.4rem); letter-spacing: -.06em; }
     p { margin: 0; color: var(--muted); }
+    .version { margin-top: 6px; font-size: .82rem; }
     button {
       border: 0; border-radius: 9px; padding: 11px 16px; background: var(--accent);
       color: white; font: inherit; font-weight: 700; cursor: pointer;
@@ -45,6 +46,19 @@
     }
     input:focus { outline: 3px solid #087f6825; border-color: var(--accent); }
     .check { display: flex; gap: 10px; align-items: center; }
+    .range-control { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; }
+    .range-control input { width: 100%; accent-color: var(--accent); }
+    .range-control output { min-width: 4ch; text-align: right; font-variant-numeric: tabular-nums; }
+    .color-control { display: flex; gap: 12px; align-items: center; }
+    .color-control input { width: 64px; height: 44px; padding: 3px; border: 1px solid var(--line); border-radius: 9px; background: white; }
+    .color-control output { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .switch-control { display: flex; align-items: center; gap: 12px; cursor: pointer; }
+    .switch-control input { position: absolute; opacity: 0; pointer-events: none; }
+    .switch-track { width: 44px; height: 24px; padding: 3px; border-radius: 999px; background: #a8b0ad; transition: background .16s ease; }
+    .switch-track::after { content: ""; display: block; width: 18px; height: 18px; border-radius: 50%; background: white; box-shadow: 0 1px 4px #0003; transition: transform .16s ease; }
+    .switch-control input:checked + .switch-track { background: var(--accent); }
+    .switch-control input:checked + .switch-track::after { transform: translateX(20px); }
+    .switch-control input:focus-visible + .switch-track { outline: 3px solid #087f6825; }
     fieldset { border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
     .pair { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; margin-top: 9px; }
     .pair button { padding: 8px 11px; }
@@ -83,6 +97,7 @@
       <div>
         <h1>ESPConfig</h1>
         <p id="subtitle">Configure an ESP32 over serial or Bluetooth.</p>
+        <p class="version" id="version-info"></p>
       </div>
       <div class="connect-actions">
         <button id="connect-serial">Connect Serial</button>
@@ -108,6 +123,8 @@
     const MAGIC_FIRST = 0xec;
     const MAGIC_SECOND = 0xcf;
     const PROTOCOL_VERSION = 1;
+    const PROTOCOL_API_VERSION = 4;
+    const WEB_VERSION = "1.1.0";
     const MAX_PAYLOAD_LENGTH = 16384;
     const PACKET_TYPES = {
       HELLO: 0x01, AUTH: 0x02, SCHEMA: 0x03, CONFIG: 0x04,
@@ -129,6 +146,7 @@
     const status = document.querySelector("#status");
     const message = document.querySelector("#message");
     const subtitle = document.querySelector("#subtitle");
+    const versionInfo = document.querySelector("#version-info");
     const logOutput = document.querySelector("#log");
     const clearLogButton = document.querySelector("#clear-log");
 
@@ -150,6 +168,12 @@
     let handshakeAttempt = 0;
     let sendQueue = Promise.resolve();
     const pending = new Map();
+
+    function showVersions(libraryVersion = null, protocolVersion = null) {
+      versionInfo.textContent = libraryVersion
+        ? `Web v${WEB_VERSION} | Library v${libraryVersion} | Protocol v${protocolVersion}`
+        : `Web v${WEB_VERSION}`;
+    }
 
     function setMessage(text, error = false) {
       message.textContent = text;
@@ -364,6 +388,7 @@
       deviceActions = [];
       values = {};
       subtitle.textContent = "Configure an ESP32 over serial or Bluetooth.";
+      showVersions();
       form.innerHTML = `<div class="empty">Connect an ESP32 to load its configurable properties.</div>`;
       setMessage("");
     }
@@ -579,6 +604,15 @@
         if (packet.type === "ready") {
           packetReceived("ready");
           subtitle.textContent = packet.device;
+          showVersions(packet.libraryVersion || "unknown", packet.protocol ?? "unknown");
+          log(`Versions: web=${WEB_VERSION}, library=${packet.libraryVersion || "unknown"}, protocol=${packet.protocol ?? "unknown"}`);
+          if (packet.protocol !== PROTOCOL_API_VERSION) {
+            const text = `Incompatible protocol: webpage requires v${PROTOCOL_API_VERSION}, device reports v${packet.protocol ?? "unknown"}.`;
+            status.lastElementChild.textContent = `Connected to ${packet.device}, incompatible`;
+            setMessage(text, true);
+            log(text, "error");
+            return;
+          }
           status.lastElementChild.textContent = `Connected to ${packet.device}`;
           if (packet.protected && !packet.authenticated) {
             status.lastElementChild.textContent = `Connected to ${packet.device}, locked`;
@@ -614,7 +648,58 @@
       }
     }
 
+    function fieldInputValue(field, input) {
+      return field.type === "boolean" ? String(input.checked) : input.value;
+    }
+
+    function restoreFieldInput(field, input) {
+      const value = values[field.key];
+      if (field.type === "boolean") {
+        input.checked = Boolean(value);
+      } else {
+        input.value = value ?? "";
+      }
+      const output = input.parentElement?.querySelector("output");
+      if (output) output.value = input.value;
+    }
+
+    function enableImmediateUpdate(field, input) {
+      if (!field.immediateUpdate) return;
+      input.addEventListener("change", async () => {
+        input.disabled = true;
+        setMessage(`Updating ${field.label}...`);
+        try {
+          const value = fieldInputValue(field, input);
+          await request("SET", field.key, value);
+          values[field.key] = field.type === "boolean"
+            ? input.checked
+            : field.type === "integer" ? Number(input.value) : input.value;
+          setMessage(`${field.label} updated.`);
+        } catch (error) {
+          restoreFieldInput(field, input);
+          log(error.message, "error");
+          setMessage(error.message, true);
+        } finally {
+          input.disabled = false;
+        }
+      });
+    }
+
     function inputFor(field) {
+      if (field.control === "switch") {
+        const wrapper = document.createElement("label");
+        wrapper.className = "switch-control";
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.name = field.key;
+        input.checked = Boolean(values[field.key]);
+        enableImmediateUpdate(field, input);
+        const track = document.createElement("span");
+        track.className = "switch-track";
+        wrapper.append(input, track, document.createTextNode(field.label));
+        return wrapper;
+      }
+
       if (field.type === "boolean") {
         const wrapper = document.createElement("label");
         wrapper.className = "check";
@@ -622,6 +707,7 @@
         input.type = "checkbox";
         input.name = field.key;
         input.checked = Boolean(values[field.key]);
+        enableImmediateUpdate(field, input);
         wrapper.append(input, document.createTextNode(field.label));
         return wrapper;
       }
@@ -635,9 +721,42 @@
       const input = document.createElement("input");
       input.id = `field-${field.key}`;
       input.name = field.key;
-      input.type = field.type === "integer" ? "number" : "text";
       input.required = field.required;
+
+      if (field.control === "slider") {
+        input.type = "range";
+        input.min = field.minimum;
+        input.max = field.maximum;
+        input.step = field.step;
+        input.value = values[field.key] ?? field.minimum;
+        const row = document.createElement("div");
+        row.className = "range-control";
+        const output = document.createElement("output");
+        output.value = input.value;
+        input.addEventListener("input", () => output.value = input.value);
+        enableImmediateUpdate(field, input);
+        row.append(input, output);
+        wrapper.append(label, row);
+        return wrapper;
+      }
+
+      if (field.control === "color") {
+        input.type = "color";
+        input.value = /^#[0-9a-f]{6}$/i.test(values[field.key] || "") ? values[field.key] : "#000000";
+        const row = document.createElement("div");
+        row.className = "color-control";
+        const output = document.createElement("output");
+        output.value = input.value;
+        input.addEventListener("input", () => output.value = input.value);
+        enableImmediateUpdate(field, input);
+        row.append(input, output);
+        wrapper.append(label, row);
+        return wrapper;
+      }
+
+      input.type = field.type === "integer" ? "number" : "text";
       input.value = values[field.key] ?? "";
+      enableImmediateUpdate(field, input);
       wrapper.append(label, input);
       return wrapper;
     }
@@ -830,6 +949,7 @@
               await request("ADD_PAIR", field.key, pairInputValue(row, "first"), pairInputValue(row, "second"));
             }
           } else {
+            if (field.immediateUpdate) continue;
             const input = form.elements.namedItem(field.key);
             await request("SET", field.key, field.type === "boolean" ? String(input.checked) : input.value);
           }
@@ -852,6 +972,7 @@
     navigator.serial?.addEventListener("disconnect", event => {
       if (event.target === port) disconnect();
     });
+    showVersions();
   </script>
 </body>
 </html>
